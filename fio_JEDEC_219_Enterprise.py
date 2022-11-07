@@ -21,6 +21,7 @@ def identify_drive():
     Will find the boot drive automatically. Works best if there are only two drives. 
     Can also manually set the test drive here.
     """
+    # need to drop the namespace target in the device.
     # find boot drive. works for both NVMe and SATA drives
     bootdrive_check = ""
     try:
@@ -33,15 +34,20 @@ def identify_drive():
             bootdrive = "sda"
     bootdrive = bootdrive_check[5:8]
     DRIVE = ""
-    # assume the other drive is DUT.
-    # update for nvme and sata
+    # assume the other drive is DUT. updated for NVME and SATA
     RAW_DR_LIST=json.loads(subprocess.check_output("sudo lsblk --json",shell=True))
     DR_LIST = [DR['name'] for DR in RAW_DR_LIST['blockdevices']]
     for d in DR_LIST:
         # disregard items that have 'loop' or is the bootdrive
         if not ("loop" in d or bootdrive in d):
-            DRIVE = "/dev/" + d
+            DRIVE = d
     # verify the selection made
+    # truncate namespaces or partition numbers (sda1 -> sda, nvme0n1 -> nvme0)
+    if DRIVE[0] == "s":
+        DRIVE = DRIVE[0:2]
+    elif DRIVE[0] == "n":
+        DRIVE = DRIVE[0:3]
+    DRIVE = "/dev/" + DRIVE
     ver = user_verify(DRIVE)
     if not ver:
         sys.exit()
@@ -55,16 +61,16 @@ def perform_command(command, file):
         out_handle.write(output)
     return 1
 
-def record_data(period):
+def record_drive_data(period):
     global _drive
     os.chdir("./logs")
-    # collect SMART
     os.mkdir("./" + period)
     os.chdir("./" + period)
     perform_command(['smartctl', '-a', _drive], "smartctl_" + str(time.time()) + ".txt")
-    perform_command(['smartctl', ], "json_SMART.txt")
-    perform_command(['lshw'], "lshw.txt")
+    perform_command(['smartctl', '-json=u', '-x', _drive], "json_SMART.txt")
+    perform_command(['lshw', '-json'], "lshw.txt")
     perform_command(['dmesg'], "dmesg.txt")
+    perform_command(['journalctl'], "journalctl.txt")
     os.chdir("..")
     os.chdir("..")
     return 1
@@ -116,11 +122,17 @@ def endurance_phase():
         job.write("numjobs=4\n")
         job.write("random_distribution=zoned:50/5:30/15:20/80\n")
         job.write("randrepeat=0\n")
+        # time based vs data based
         #job.write("time_based\n")
         #job.write("runtime=57600\n")
-        job.write("size=20TB") #20TB
+        job.write("size=20TB\n") #20TB
         job.write("norandommap\n")
         job.write("group_reporting=1\n")
+        # records the performance of the drive. not needed for an endurance test but here just in case.
+        #job.write("log_avg_msec=1000")
+        #job.write("per_job_logs=0")
+        #job.write("write_lat_log=endurance_lat")
+        #job.write("write_bw_log=endurance_bw")
         job.close()
         return job
     endurance = create_job_file()
@@ -133,15 +145,21 @@ def endurance_phase():
 
 def summary():
     global _drive
+    collect_system_info()
     # calculate currently estimated TBW from devices.
-    calculatedTBW = calculateTBW()
+    calculatedTBW = calculate_TBW()
     # generate checksum of device for retention test.
     checksum=subprocess.check_output("sudo pv "+_drive+"| md5sum",shell=True)
     # record all errors (read errors, uecc, hw recovered, serial number, temperature, erase count)
-
     return calculatedTBW
 
-def openSMART(file_name):
+def collect_system_info():
+    # want to get model name, capacity, serial number, 
+    # also get OS, system info
+    
+    return 1
+
+def open_smart(file_name):
     written = 1
     life = 1
     f = open(file_name)
@@ -153,17 +171,16 @@ def openSMART(file_name):
             written = smart_attr['raw']['value']
     return (written, life)
 
-def parseSMART():
+def parse_smart():
     # get the start and the end files
     start_file = "./JEDEC_TEST_FIO/logs/precond/json_SMART.json"
     end_file = "./JEDEC_TEST_FIO/logs/end/json_SMART.json"
-    (gb_start, life_start) = openSMART(start_file)
-    (gb_end, life_end) = openSMART(end_file)
+    (gb_start, life_start) = open_smart(start_file)
+    (gb_end, life_end) = open_smart(end_file)
     return (gb_start,gb_end,life_start,life_end)
 
-def calculateTBW():
-    # take the LBA from 
-    (GB_start, GB_end, life_start,life_end) = (parseSMART())
+def calculate_TBW():
+    (GB_start, GB_end, life_start,life_end) = (open_smart())
     TBW = ((GB_end - GB_start)/1000) * 100 / (life_end - life_start)
     return TBW
 
@@ -176,11 +193,12 @@ def main():
     os.chdir("./JEDEC_TEST_FIO")
     if not os.path.isdir("./logs"):
         os.mkdir("./logs")
-    record_data("start")
+    collect_system_info()
+    record_drive_data("start")
     precondition()
-    record_data("precond")
+    record_drive_data("precond")
     endurance_phase()
-    record_data("end")
+    record_drive_data("end")
     summary()
     return 1
 
