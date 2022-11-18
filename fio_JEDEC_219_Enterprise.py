@@ -5,7 +5,7 @@ import subprocess
 import time
 import tempfile
 import json
-
+import math
 global _drive
 
 def user_verify(DRIVE):
@@ -44,9 +44,9 @@ def identify_drive():
     # verify the selection made
     # truncate namespaces or partition numbers (sda1 -> sda, nvme0n1 -> nvme0)
     if DRIVE[0] == "s":
-        DRIVE = DRIVE[0:2]
-    elif DRIVE[0] == "n":
         DRIVE = DRIVE[0:3]
+    elif DRIVE[0] == "n":
+        DRIVE = DRIVE[0:4]
     DRIVE = "/dev/" + DRIVE
     ver = user_verify(DRIVE)
     if not ver:
@@ -145,7 +145,7 @@ def endurance_phase():
 
 def summary():
     global _drive
-    collect_system_info()
+    #collect_system_info()
     # calculate currently estimated TBW from devices.
     calculatedTBW = calculate_TBW()
     # generate checksum of device for retention test.
@@ -154,9 +154,16 @@ def summary():
     return calculatedTBW
 
 def collect_system_info():
-    # want to get model name, capacity, serial number, 
-    # also get OS, system info
-    
+    # want to get model name, firmware version, capacity, serial number. this comes from SMART.
+    #file_path = "./JEDEC_TEST_FIO/logs/start/json_SMART.json"\
+    file_path = "./1_SMART.json"
+    f = open(file_path)
+    data = json.load(f)
+    model_name = data['model_name']
+    serial_number = data['serial_number']
+    firmware = data['firmware_version']
+    capacity = math.floor(data['user_capacity']['bytes'] / 1000000000)
+    print((model_name, serial_number, firmware, capacity))
     return 1
 
 def open_smart(file_name):
@@ -185,21 +192,21 @@ def calculate_TBW():
     return TBW
 
 def main():
-    global _drive
-    _drive = identify_drive()
+    #global _drive
+    #_drive = identify_drive()
     #generate file structure
-    if not os.path.isdir("./JEDEC_TEST_FIO"):
-        os.mkdir("./JEDEC_TEST_FIO")
-    os.chdir("./JEDEC_TEST_FIO")
-    if not os.path.isdir("./logs"):
-        os.mkdir("./logs")
+    #if not os.path.isdir("./JEDEC_TEST_FIO"):
+    #    os.mkdir("./JEDEC_TEST_FIO")
+    #os.chdir("./JEDEC_TEST_FIO")
+    #if not os.path.isdir("./logs"):
+    #    os.mkdir("./logs")
+    #record_drive_data("start")
     collect_system_info()
-    record_drive_data("start")
-    precondition()
-    record_drive_data("precond")
-    endurance_phase()
-    record_drive_data("end")
-    summary()
+    #precondition()
+    #record_drive_data("precond")
+    #endurance_phase()
+    #record_drive_data("end")
+    #summary()
     return 1
 
 if __name__ == "__main__":
